@@ -15,7 +15,17 @@ cl ^
     /MD ^
     /FC /nologo /utf-8 ^
     /sdl /W4 /WX ^
-    ..\src\*.c
+    ^
+    /IC:\VulkanSDK\1.3.268.0\Include ^
+    ..\src\vulkan\*.c ^
+    ..\src\vulkan\offscreen\*.c ^
+    ..\src\vulkan\windows\*.c ^
+    ..\src\*.c ^
+    ^
+    /link ^
+    /LIBPATH:C:\VulkanSDK\1.3.268.0\Lib ^
+    vulkan-1.lib ^
+    user32.lib
 
 del *.obj
 
