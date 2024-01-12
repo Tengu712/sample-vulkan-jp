@@ -1,19 +1,19 @@
-#include "common.h"
+#include "memory.h"
 
-#include <stdint.h>
+#include "../error.h"
+
 #include <stdio.h>
 #include <stdlib.h>
-#include <vulkan/vulkan.h>
 
 VkDeviceMemory allocateDeviceMemory(
     const VkDevice device,
     const VkPhysicalDeviceMemoryProperties *physDevMemProps,
     uint32_t type,
-    VkMemoryPropertyFlags props,
+    VkMemoryPropertyFlags memPropFlags,
     VkDeviceSize size
 ) {
-#define CHECK_VK(p, m) ERROR_IF_WITH((p) != VK_SUCCESS, "allocateDeviceMemory()", (m), (p), "", NULL)
-#define CHECK(p, m)    ERROR_IF     (!(p),              "allocateDeviceMemory()", (m),      "", NULL)
+#define CHECK_VK(p, m) ERROR_IF_WITH((p) != VK_SUCCESS, "allocateDeviceMemory()", (m), (p), {}, NULL)
+#define CHECK(p, m)    ERROR_IF     (!(p),              "allocateDeviceMemory()", (m),      {}, NULL)
 
     // 要求に従った物理デバイス上のメモリタイプのインデックスを取得する
     uint32_t memTypeIndex = 0;
@@ -21,7 +21,7 @@ VkDeviceMemory allocateDeviceMemory(
         int found = 0;
         for (uint32_t i = 0; i < physDevMemProps->memoryTypeCount; ++i) {
             if ((1 << i) & type) {
-                if ((physDevMemProps->memoryTypes[i].propertyFlags & props) == props) {
+                if ((physDevMemProps->memoryTypes[i].propertyFlags & memPropFlags) == memPropFlags) {
                     memTypeIndex = i;
                     found = 1;
                     break;
@@ -46,5 +46,20 @@ VkDeviceMemory allocateDeviceMemory(
     return devMemory;
 
 #undef CHECK
+#undef CHECK_VK
+}
+
+int uploadToDeviceMemory(const VkDevice device, const VkDeviceMemory devMemory, const void *source, uint32_t size) {
+#define CHECK_VK(p, m) ERROR_IF_WITH((p) != VK_SUCCESS, "uploadToDeviceMemory()", (m), (p), {}, 0)
+
+    void *p;
+    CHECK_VK(vkMapMemory(device, devMemory, 0, VK_WHOLE_SIZE, 0, &p), "デバイスメモリのマップに失敗");
+
+    memcpy(p, source, size);
+
+    vkUnmapMemory(device, devMemory);
+
+    return 1;
+
 #undef CHECK_VK
 }

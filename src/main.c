@@ -1,8 +1,8 @@
 /// @file main.c
 /// @brief エントリーモジュール
 
-#include "vulkan/offscreen/offscreen.h"
-#include "vulkan/windows/windows.h"
+#include "apps/offscreen/offscreen.h"
+#include "apps/windows/windows.h"
 
 #include <stdio.h>
 #include <string.h>

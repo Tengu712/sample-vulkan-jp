@@ -1,2 +1,5 @@
-/docs/
-/out/
+/bin/rendering-result.png
+
+*.exe
+*.spv
+*.raw

@@ -1,11 +1,25 @@
 #include "core.h"
 
-#include "common.h"
+#include "util/error.h"
 
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <vulkan/vulkan.h>
+#include <string.h>
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void deleteVulkanAppCore(VulkanAppCore core) {
+    if (core == NULL) {
+        return;
+    }
+    if (core->device != NULL) vkDeviceWaitIdle(core->device);
+    if (core->cmdPool != NULL) vkDestroyCommandPool(core->device, core->cmdPool, NULL);
+    if (core->device != NULL) vkDestroyDevice(core->device, NULL);
+    if (core->instance != NULL) vkDestroyInstance(core->instance, NULL);
+    free((void *)core);
+}
 
 VulkanAppCore createVulkanAppCore(
     uint32_t instLayerNamesCount,
@@ -22,6 +36,7 @@ VulkanAppCore createVulkanAppCore(
 
     const VulkanAppCore core = (VulkanAppCore)malloc(sizeof(struct VulkanAppCore_t));
     CHECK(core != NULL, "VulkanAppCoreのメモリ確保に失敗");
+    memset(core, 0, sizeof(struct VulkanAppCore_t));
 
     // Vulkanインスタンスを作成する
     //
@@ -136,9 +151,7 @@ VulkanAppCore createVulkanAppCore(
     //
     // NOTE: ここで取得したキューに命令を送ることでデバイスに計算させられる。
     //       今回は、論理デバイス作成時に、1個しかキューを使わないとしたため、1個(0番目)だけ取得する。
-    {
-        vkGetDeviceQueue(core->device, queueFamIndex, 0, &core->queue);
-    }
+    vkGetDeviceQueue(core->device, queueFamIndex, 0, &core->queue);
 
     // コマンドプールを作成する
     //
@@ -169,22 +182,19 @@ VulkanAppCore createVulkanAppCore(
 #undef CHECK_VK
 }
 
-void deleteVulkanAppCore(VulkanAppCore core) {
-    vkDeviceWaitIdle(core->device);
-    vkDestroyCommandPool(core->device, core->cmdPool, NULL);
-    vkDestroyDevice(core->device, NULL);
-    vkDestroyInstance(core->instance, NULL);
-    free((void *)core);
-}
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-int allocateAndStartCommandBuffer(VulkanAppCore core, VkCommandBuffer *cmdBuffer) {
-#define CHECK_VK(p, m) ERROR_IF_WITH((p) != VK_SUCCESS, "createAndStartCommandBuffer()", (m), (p), "", 0)
+VkCommandBuffer allocateAndStartCommandBuffer(VulkanAppCore core) {
+#define CHECK_VK(p, m) ERROR_IF_WITH((p) != VK_SUCCESS, "createAndStartCommandBuffer()", (m), (p), {}, NULL)
 
     // コマンドバッファを確保する
     //
     // NOTE: ここにコマンドを記録していき、キューに提出することでデバイスに計算させる。
     //       今回コマンドプールは「実行されたら破棄される」コマンドバッファしか確保できない設定にしている。
     //       そのため、このコマンドバッファは解放する必要がない。
+    VkCommandBuffer cmdBuffer;
     {
         const VkCommandBufferAllocateInfo ai = {
             VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -193,7 +203,7 @@ int allocateAndStartCommandBuffer(VulkanAppCore core, VkCommandBuffer *cmdBuffer
             VK_COMMAND_BUFFER_LEVEL_PRIMARY,
             1,
         };
-        CHECK_VK(vkAllocateCommandBuffers(core->device, &ai, cmdBuffer), "コマンドバッファの確保に失敗");
+        CHECK_VK(vkAllocateCommandBuffers(core->device, &ai, &cmdBuffer), "コマンドバッファの確保に失敗");
     }
 
     // コマンドバッファへの記録を開始する
@@ -207,10 +217,10 @@ int allocateAndStartCommandBuffer(VulkanAppCore core, VkCommandBuffer *cmdBuffer
             VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
             NULL,
         };
-        CHECK_VK(vkBeginCommandBuffer(*cmdBuffer, &bi), "コマンドバッファへのコマンド記録の開始を失敗");
+        CHECK_VK(vkBeginCommandBuffer(cmdBuffer, &bi), "コマンドバッファへのコマンド記録の開始を失敗");
     }
 
-    return 1;
+    return cmdBuffer;
 
 #undef CHECK_VK
 }
@@ -224,12 +234,10 @@ int endAndSubmitCommandBuffer(
     uint32_t signalSemaphoresCount,
     const VkSemaphore *signalSemaphores
 ) {
-#define CHECK_VK(p, m) ERROR_IF_WITH((p) != VK_SUCCESS, "submitCommandBuffer()", (m), (p), "", 0)
+#define CHECK_VK(p, m) ERROR_IF_WITH((p) != VK_SUCCESS, "submitCommandBuffer()", (m), (p), {}, 0)
 
     // コマンドバッファを終了する
-    {
-        vkEndCommandBuffer(cmdBuffer);
-    }
+    vkEndCommandBuffer(cmdBuffer);
 
     // コマンドバッファをキューに提出する
     //

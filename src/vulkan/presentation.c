@@ -1,11 +1,32 @@
 #include "presentation.h"
 
-#include "common.h"
+#include "util/constant.h"
+#include "util/error.h"
 
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <vulkan/vulkan.h>
+#include <string.h>
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void deleteVulkanAppPresentation(const VulkanAppCore core, VulkanAppPresentation presenter) {
+    if (presenter == NULL) {
+        return;
+    }
+    vkDeviceWaitIdle(core->device);
+    if (presenter->waitForRenderingSemaphore) vkDestroySemaphore(core->device, presenter->waitForRenderingSemaphore, NULL);
+    if (presenter->waitForImageEnabledSemaphore) vkDestroySemaphore(core->device, presenter->waitForImageEnabledSemaphore, NULL);
+    if (presenter->imageViews != NULL) {
+        for (uint32_t i = 0; i < presenter->imagesCount; ++i) {
+            if (presenter->imageViews[i] != NULL) vkDestroyImageView(core->device, presenter->imageViews[i], NULL);
+        }
+        free((void *)presenter->imageViews);
+    }
+    if (presenter->swapchain != NULL) vkDestroySwapchainKHR(core->device, presenter->swapchain, NULL);
+    free((void *)presenter);
+}
 
 VulkanAppPresentation createVulkanAppPresentation(const VulkanAppCore core, const VkSurfaceKHR surface) {
 #define CHECK_VK(p, m) ERROR_IF_WITH((p) != VK_SUCCESS, "createVulkanAppPresentation()", (m), (p), deleteVulkanAppPresentation(core, presenter), NULL)
@@ -13,6 +34,7 @@ VulkanAppPresentation createVulkanAppPresentation(const VulkanAppCore core, cons
 
     const VulkanAppPresentation presenter = (VulkanAppPresentation)malloc(sizeof(struct VulkanAppPresentation_t));
     CHECK(presenter != NULL, "VulkanAppPresentationのメモリ確保に失敗");
+    memset(presenter, 0, sizeof(struct VulkanAppPresentation_t));
 
     // サーフェスが条件を満たしているか確認する
     //
@@ -28,7 +50,7 @@ VulkanAppPresentation createVulkanAppPresentation(const VulkanAppCore core, cons
 
         int found = 0;
         for (uint32_t i = 0; i < count; ++i) {
-            if (formats[i].format == SURFACE_PIXEL_FORMAT && formats[i].colorSpace == SURFACE_COLOR_SPACE) {
+            if (formats[i].format == RENDER_TARGET_PIXEL_FORMAT && formats[i].colorSpace == RENDER_TARGET_COLOR_SPACE) {
                 found = 1;
                 break;
             }
@@ -72,8 +94,8 @@ VulkanAppPresentation createVulkanAppPresentation(const VulkanAppCore core, cons
             0,
             surface,
             presenter->imagesCount,
-            SURFACE_PIXEL_FORMAT,
-            SURFACE_COLOR_SPACE,
+            RENDER_TARGET_PIXEL_FORMAT,
+            RENDER_TARGET_COLOR_SPACE,
             { presenter->width, presenter->height },
             1,
             VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
@@ -107,7 +129,7 @@ VulkanAppPresentation createVulkanAppPresentation(const VulkanAppCore core, cons
                 0,
                 images[i],
                 VK_IMAGE_VIEW_TYPE_2D,
-                SURFACE_PIXEL_FORMAT,
+                RENDER_TARGET_PIXEL_FORMAT,
                 { 0 },
                 { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 },
             };
@@ -139,16 +161,9 @@ VulkanAppPresentation createVulkanAppPresentation(const VulkanAppCore core, cons
 #undef CHECK_VK
 }
 
-void deleteVulkanAppPresentation(const VulkanAppCore core, VulkanAppPresentation presenter) {
-    vkDeviceWaitIdle(core->device);
-    vkDestroySemaphore(core->device, presenter->waitForRenderingSemaphore, NULL);
-    vkDestroySemaphore(core->device, presenter->waitForImageEnabledSemaphore, NULL);
-    for (uint32_t i = 0; i < presenter->imagesCount; ++i) {
-        vkDestroyImageView(core->device, presenter->imageViews[i], NULL);
-    }
-    vkDestroySwapchainKHR(core->device, presenter->swapchain, NULL);
-    free((void *)presenter);
-}
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 int acquireNextImageIndex(const VulkanAppCore core, const VulkanAppPresentation presenter) {
 #define CHECK_VK(p, m) ERROR_IF_WITH((p) != VK_SUCCESS, "acquireNextImageIndex()", (m), (p), "", 0)
@@ -157,25 +172,25 @@ int acquireNextImageIndex(const VulkanAppCore core, const VulkanAppPresentation 
     // NOTE: ダブルバッファリングを行う場合どうせ1枚目2枚目1枚目...と続くので手動でもいいように思えるが必須の処理。
     //       真にイメージが利用可能になるのを同期するために、セマフォを指定する。
     //       フェンスもセマフォもNULLにするとvalidationに怒られる。
-    {
-        CHECK_VK(
-            vkAcquireNextImageKHR(
-                core->device,
-                presenter->swapchain,
-                UINT64_MAX,
-                presenter->waitForImageEnabledSemaphore,
-                NULL,
-                &presenter->imageIndex
-            ),
-            "次のフレームバッファのインデックスの取得に失敗"
-        );
-    }
+    CHECK_VK(
+        vkAcquireNextImageKHR(
+            core->device,
+            presenter->swapchain,
+            UINT64_MAX,
+            presenter->waitForImageEnabledSemaphore,
+            NULL,
+            &presenter->imageIndex
+        ),
+        "次のフレームバッファのインデックスの取得に失敗"
+    );
     return 1;
 #undef CHECK_VK
 }
 
 int present(const VulkanAppCore core, const VulkanAppPresentation presenter) {
 #define CHECK_VK(p, m) ERROR_IF_WITH((p) != VK_SUCCESS, "present()", (m), (p), "", 0)
+#define SEMAPHORES_COUNT 1
+#define SWAPCHAINS_COUNT 1
     // プレゼンテーションコマンドをエンキューする
     //
     // NOTE: これが成功すると画面に描画結果が表示される。
@@ -188,28 +203,24 @@ int present(const VulkanAppCore core, const VulkanAppPresentation presenter) {
     // NOTE: また、vkQueuePresentKHR()関数は一度に複数のスワップチェーンをプレゼンテーションできる(1スワップチェーンにつき1イメージ)。
     //       それに伴って、各スワップチェーンでのプレゼンテーションが完了したかを取得できる。
     //       今回は一つしかスワップチェーンを使わない(一画面しかない)ため一つだけ指定する。
-    {
-#define SEMAPHORES_COUNT 1
-#define SWAPCHAINS_COUNT 1
-        const VkSemaphore semaphores[SEMAPHORES_COUNT] = { presenter->waitForRenderingSemaphore };
-        const VkSwapchainKHR swapchains[SWAPCHAINS_COUNT] = { presenter->swapchain };
-        const uint32_t imageIndices[SWAPCHAINS_COUNT] = { presenter->imageIndex };
-        VkResult results[SWAPCHAINS_COUNT] = { VK_SUCCESS };
-        const VkPresentInfoKHR pi = {
-            VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-            NULL,
-            SEMAPHORES_COUNT,
-            semaphores,
-            SWAPCHAINS_COUNT,
-            swapchains,
-            imageIndices,
-            results,
-        };
-        CHECK_VK(vkQueuePresentKHR(core->queue, &pi), "プレゼンテーションコマンドのエンキューに失敗");
-        CHECK_VK(results[0], "プレゼンテーションに失敗");
+    const VkSemaphore semaphores[SEMAPHORES_COUNT] = { presenter->waitForRenderingSemaphore };
+    const VkSwapchainKHR swapchains[SWAPCHAINS_COUNT] = { presenter->swapchain };
+    const uint32_t imageIndices[SWAPCHAINS_COUNT] = { presenter->imageIndex };
+    VkResult results[SWAPCHAINS_COUNT] = { VK_SUCCESS };
+    const VkPresentInfoKHR pi = {
+        VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        NULL,
+        SEMAPHORES_COUNT,
+        semaphores,
+        SWAPCHAINS_COUNT,
+        swapchains,
+        imageIndices,
+        results,
+    };
+    CHECK_VK(vkQueuePresentKHR(core->queue, &pi), "プレゼンテーションコマンドのエンキューに失敗");
+    CHECK_VK(results[0], "プレゼンテーションに失敗");
+    return 1;
 #undef SWAPCHAINS_COUNT
 #undef SEMAPHORES_COUNT
-    }
-    return 1;
 #undef CHECK_VK
 }

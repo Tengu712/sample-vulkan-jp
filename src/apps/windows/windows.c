@@ -5,14 +5,28 @@
 // このマクロを<vulkan/vulkan.h>のinclude前に定義しないとWin32ウィンドウに関するAPIが使えない。
 # define VK_USE_PLATFORM_WIN32_KHR
 
-# include "../common.h"
-# include "../core.h"
-# include "../presentation.h"
-# include "../rendering.h"
+# include "../../vulkan/core.h"
+# include "../../vulkan/presentation.h"
+# include "../../vulkan/rendering.h"
+# include "../../vulkan/util/error.h"
 
 # include <stdio.h>
 # include <vulkan/vulkan.h>
 # include <Windows.h>
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+LRESULT CALLBACK WindowProcedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
+    switch (message) {
+        case WM_DESTROY:
+            PostQuitMessage(0);
+            return 0;
+        default:
+            return DefWindowProc(window, message, wParam, lParam);
+    }
+}
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -34,16 +48,6 @@ void deleteVulkanAppWindows(const VulkanAppCore core, VulkanAppWindows windows) 
     if (windows->window != NULL) DestroyWindow(windows->window);
     UnregisterClassW(L"SampleVulkanJP\0", windows->instance);
     free((void *)windows);
-}
-
-LRESULT CALLBACK WindowProcedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
-    switch (message) {
-        case WM_DESTROY:
-            PostQuitMessage(0);
-            return 0;
-        default:
-            return DefWindowProc(window, message, wParam, lParam);
-    }
 }
 
 VulkanAppWindows createVulkanAppWindows(const VulkanAppCore core, int width, int height) {
@@ -123,7 +127,7 @@ VulkanAppWindows createVulkanAppWindows(const VulkanAppCore core, int width, int
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-// オフスクリーン向けVulkanアプリケーションで必要なモジュールを持つ構造体
+// Windows向けVulkanアプリケーションで必要なモジュールを持つ構造体
 typedef struct ModulesForWindows_t {
     VulkanAppCore core;
     VulkanAppWindows windows;
@@ -142,7 +146,7 @@ void deleteModulesForWindows(const ModulesForWindows *mods) {
 }
 
 int runOnWindows(int width, int height) {
-#define CHECK(p, m) ERROR_IF(!(p), "runOnWindows()", (m), deleteModulesForWindows(&mods), 1)
+# define CHECK(p, m) ERROR_IF(!(p), "runOnWindows()", (m), deleteModulesForWindows(&mods), 1)
 
     ModulesForWindows mods = {
         NULL,
@@ -237,6 +241,8 @@ int runOnWindows(int width, int height) {
 
     deleteModulesForWindows(&mods);
     return 0;
+
+# undef CHECK
 }
 
 #else

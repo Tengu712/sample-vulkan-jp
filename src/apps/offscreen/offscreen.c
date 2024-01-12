@@ -7,9 +7,12 @@
 // stb_image_write.h内のsprintf()関数の使用に対してwarningを出さないためにこのマクロを定義する
 #define _CRT_SECURE_NO_WARNINGS
 
-#include "../common.h"
-#include "../core.h"
-#include "../rendering.h"
+#include "../../vulkan/core.h"
+#include "../../vulkan/rendering.h"
+#include "../../vulkan/util/constant.h"
+#include "../../vulkan/util/error.h"
+#include "../../vulkan/util/memory/buffer.h"
+#include "../../vulkan/util/memory/image.h"
 #include "stb_image.h"
 #include "stb_image_write.h"
 
@@ -23,10 +26,7 @@
 
 // Vulkanアプリケーションのうちオフスクリーンでのオブジェクトを持つ構造体
 typedef struct VulkanAppOffscreen_t {
-    VkExtent3D imageExtent;
-    VkImage image;
-    VkMemoryRequirements memReqs;
-    VkDeviceMemory devMemory;
+    Image image;
     VkImageView imageView;
 } *VulkanAppOffscreen;
 
@@ -36,8 +36,7 @@ void deleteVulkanAppOffscreen(const VulkanAppCore core, VulkanAppOffscreen offsc
     }
     vkDeviceWaitIdle(core->device);
     if (offscreen->imageView != NULL) vkDestroyImageView(core->device, offscreen->imageView, NULL);
-    if (offscreen->devMemory != NULL) vkFreeMemory(core->device, offscreen->devMemory, NULL);
-    if (offscreen->image != NULL) vkDestroyImage(core->device, offscreen->image, NULL);
+    if (offscreen->image != NULL) deleteImage(core->device, offscreen->image);
     free((void *)offscreen);
 }
 
@@ -48,58 +47,22 @@ VulkanAppOffscreen createVulkanAppOffscreen(const VulkanAppCore core, int width,
     const VulkanAppOffscreen offscreen = (VulkanAppOffscreen)malloc(sizeof(struct VulkanAppOffscreen_t));
     CHECK(offscreen != NULL, "VulkanAppOffscreenの確保に失敗");
 
-    // イメージのextentを設定する
-    {
-        offscreen->imageExtent.width = (uint32_t)width;
-        offscreen->imageExtent.height = (uint32_t)height;
-        offscreen->imageExtent.depth = 1;
-    }
-
     // 描画先イメージを作成する
     //
     // NOTE: この描画先イメージは後々画像ファイルに保存するために一時バッファへコピーを行う。
-    //       そのため、コピー元としても使えるようVK_IMAGE_USAGE_TRANSFER_SRC_BITを指定する。
+    //       そのため、コピー元としても使えるようUsageにVK_IMAGE_USAGE_TRANSFER_SRC_BITも指定する。
+    //       ただし、描画先イメージはデバイスローカルメモリになければならないため、Memory PropertyにVK_MEMORY_PROPERTY_DEVICE_LOCAL_BITを指定する。
     {
-        const VkImageCreateInfo ci = {
-            VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-            NULL,
-            0,
-            VK_IMAGE_TYPE_2D,
-            SURFACE_PIXEL_FORMAT,
-            offscreen->imageExtent,
-            1,
-            1,
-            VK_SAMPLE_COUNT_1_BIT,
-            VK_IMAGE_TILING_OPTIMAL,
-            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-            VK_SHARING_MODE_EXCLUSIVE,
-            0,
-            NULL,
-            VK_IMAGE_LAYOUT_UNDEFINED,
-        };
-        CHECK_VK(vkCreateImage(core->device, &ci, NULL, &offscreen->image), "描画先イメージの作成に失敗");
-    }
-
-    // 描画先イメージの必要条件を取得する
-    {
-        vkGetImageMemoryRequirements(core->device, offscreen->image, &offscreen->memReqs);
-    }
-
-    // 描画先イメージのためのデバイスメモリを確保する
-    {
-        offscreen->devMemory = allocateDeviceMemory(
+        const VkExtent3D extent = { (uint32_t)width, (uint32_t)height, 1 };
+        offscreen->image = createImage(
             core->device,
             &core->physDevMemProps,
-            offscreen->memReqs.memoryTypeBits,
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-            offscreen->memReqs.size
+            RENDER_TARGET_PIXEL_FORMAT,
+            &extent
         );
-        CHECK(offscreen->devMemory != NULL, "描画先イメージのデバイスメモリの確保に失敗");
-    }
-
-    // 描画先イメージとデバイスメモリとを関連付ける
-    {
-        CHECK_VK(vkBindImageMemory(core->device, offscreen->image, offscreen->devMemory, 0), "描画先イメージのイメージとデバイスメモリとの関連付けに失敗");
+        CHECK(offscreen->image != NULL, "描画先イメージの作成に失敗");
     }
 
     // 描画先イメージのイメージビューを作成
@@ -108,9 +71,9 @@ VulkanAppOffscreen createVulkanAppOffscreen(const VulkanAppCore core, int width,
             VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
             NULL,
             0,
-            offscreen->image,
+            offscreen->image->image,
             VK_IMAGE_VIEW_TYPE_2D,
-            SURFACE_PIXEL_FORMAT,
+            RENDER_TARGET_PIXEL_FORMAT,
             { 0 },
             { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 },
         };
@@ -129,9 +92,7 @@ VulkanAppOffscreen createVulkanAppOffscreen(const VulkanAppCore core, int width,
 
 // saveRenderingResult()関数の中で一時的に作成されるオブジェクトを持つ構造体
 typedef struct TempObjsSaveRenderingResult_t {
-    VkBuffer buffer;
-    VkMemoryRequirements memReqs;
-    VkDeviceMemory devMemory;
+    Buffer buffer;
     int mapped;
     uint8_t *pixels;
 } TempObjsSaveRenderingResult;
@@ -142,9 +103,8 @@ void deleteTempObjsSaveRenderingResult(const VulkanAppCore core, TempObjsSaveRen
     }
     vkDeviceWaitIdle(core->device);
     if (temp->pixels != NULL) free((void *)temp->pixels);
-    if (temp->mapped) vkUnmapMemory(core->device, temp->devMemory);
-    if (temp->devMemory != NULL) vkFreeMemory(core->device, temp->devMemory, NULL);
-    if (temp->buffer != NULL) vkDestroyBuffer(core->device, temp->buffer, NULL);
+    if (temp->mapped) vkUnmapMemory(core->device, temp->buffer->devMemory);
+    if (temp->buffer != NULL) deleteBuffer(core->device, temp->buffer);
 }
 
 // 描画結果を画像ファイルに保存する関数
@@ -165,60 +125,34 @@ int saveRenderingResult(const VulkanAppCore core, const VulkanAppOffscreen offsc
 
     TempObjsSaveRenderingResult temp = {
         NULL,
-        { 0 },
-        NULL,
         0,
         NULL
     };
 
     // 一時バッファを作成する
     {
-        const VkBufferCreateInfo ci = {
-            VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-            NULL,
-            0,
-            offscreen->memReqs.size,
-            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-            VK_SHARING_MODE_EXCLUSIVE,
-            0,
-            NULL
-        };
-        CHECK_VK(vkCreateBuffer(core->device, &ci, NULL, &temp.buffer), "一時バッファの作成に失敗");
-    }
-
-    // 一時バッファの必要条件を取得する
-    {
-        vkGetBufferMemoryRequirements(core->device, temp.buffer, &temp.memReqs);
-    }
-
-    // 一時バッファのためのデバイスメモリを確保する
-    {
-        temp.devMemory = allocateDeviceMemory(
+        temp.buffer = createBuffer(
             core->device,
             &core->physDevMemProps,
-            temp.memReqs.memoryTypeBits,
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
-            temp.memReqs.size
+            offscreen->image->memReqs.size
         );
-        CHECK(temp.devMemory != NULL, "一時バッファのためのデバイスメモリの確保に失敗");
-    }
-
-    // 一時バッファとデバイスメモリとを関連付ける
-    {
-        CHECK_VK(vkBindBufferMemory(core->device, temp.buffer, temp.devMemory, 0), "一時バッファとデバイスメモリとの関連付けに失敗");
+        CHECK(temp.buffer != NULL, "一時バッファの作成に失敗");
     }
 
     // マップする
     void *mappedData;
     {
-        CHECK_VK(vkMapMemory(core->device, temp.devMemory, 0, temp.memReqs.size, 0, &mappedData), "マップに失敗");
+        CHECK_VK(vkMapMemory(core->device, temp.buffer->devMemory, 0, temp.buffer->memReqs.size, 0, &mappedData), "マップに失敗");
         temp.mapped = 1;
     }
 
     // コマンドバッファを確保し記録を開始する
     VkCommandBuffer cmdBuffer;
     {
-        CHECK(allocateAndStartCommandBuffer(core, &cmdBuffer), "コマンドバッファの確保あるいは記録の開始に失敗");
+        cmdBuffer = allocateAndStartCommandBuffer(core);
+        CHECK(cmdBuffer != NULL, "コマンドバッファの確保あるいは記録の開始に失敗");
     }
 
     // コピーコマンドを記録する
@@ -231,10 +165,10 @@ int saveRenderingResult(const VulkanAppCore core, const VulkanAppOffscreen offsc
                 0,
                 { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
                 { 0, 0, 0 },
-                offscreen->imageExtent,
+                offscreen->image->extent,
             }
         };
-        vkCmdCopyImageToBuffer(cmdBuffer, offscreen->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, temp.buffer, REGIONS_COUNT, regions);
+        vkCmdCopyImageToBuffer(cmdBuffer, offscreen->image->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, temp.buffer->buffer, REGIONS_COUNT, regions);
 #undef REGIONS_COUNT
     }
 
@@ -250,8 +184,9 @@ int saveRenderingResult(const VulkanAppCore core, const VulkanAppOffscreen offsc
 
     // 描画結果を加工して取得する
     {
-        temp.pixels = (uint8_t *)malloc(sizeof(uint8_t) * offscreen->imageExtent.width * offscreen->imageExtent.height * 4);
-        for (uint32_t i = 0; i < offscreen->imageExtent.width * offscreen->imageExtent.height; ++i) {
+        const uint32_t wh = offscreen->image->extent.width * offscreen->image->extent.height;
+        temp.pixels = (uint8_t *)malloc(sizeof(uint8_t) * wh * 4);
+        for (uint32_t i = 0; i < wh; ++i) {
             temp.pixels[i * 4 + 0] = ((uint8_t *)mappedData)[i * 4 + 2];
             temp.pixels[i * 4 + 1] = ((uint8_t *)mappedData)[i * 4 + 1];
             temp.pixels[i * 4 + 2] = ((uint8_t *)mappedData)[i * 4 + 0];
@@ -264,8 +199,8 @@ int saveRenderingResult(const VulkanAppCore core, const VulkanAppOffscreen offsc
         CHECK(
             stbi_write_png(
                 "rendering-result.png",
-                offscreen->imageExtent.width,
-                offscreen->imageExtent.height,
+                offscreen->image->extent.width,
+                offscreen->image->extent.height,
                 sizeof(uint8_t) * 4,
                 (const void *)temp.pixels,
                 0

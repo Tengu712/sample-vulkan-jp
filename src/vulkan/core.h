@@ -1,6 +1,5 @@
 /// @file core.h
 /// @brief Vulkanアプリケーションの主要オブジェクトに関するモジュール
-/// @warning Vulkanアプリケーション内部向けのヘッダーファイルであるため、外部からはincludeすべきではない。
 
 #pragma once
 
@@ -17,7 +16,11 @@ typedef struct VulkanAppCore_t {
     VkCommandPool cmdPool;
 } *VulkanAppCore;
 
-/// @brief Vulkanアプリケーションの主要オブジェクトを作成する関数
+/// @brief VulkanAppCoreを破棄する関数
+/// @param core 主要オブジェクトハンドル
+void deleteVulkanAppCore(VulkanAppCore core);
+
+/// @brief VulkanAppCoreを作成する関数
 ///
 /// デバイスにコマンドを発行するために必要な最小限のオブジェクトを初期化する。
 /// 以降、以下の手順でデバイスに計算させられる。
@@ -47,10 +50,6 @@ VulkanAppCore createVulkanAppCore(
     const char *const *devExtNames
 );
 
-/// @brief Vulkanアプリケーションの主要オブジェクトを破棄する関数
-/// @param core 主要オブジェクトハンドル
-void deleteVulkanAppCore(VulkanAppCore core);
-
 /// @brief コマンドバッファを確保し記録を開始する関数
 ///
 /// コマンドバッファを一つだけ確保し、コマンドの記録を開始する。
@@ -58,9 +57,8 @@ void deleteVulkanAppCore(VulkanAppCore core);
 /// また、コマンドバッファの内容は実行されたら消滅する。
 ///
 /// @param core 主要オブジェクトハンドル
-/// @param cmdBuffer 作成されたコマンドバッファの格納先
-/// @returns 失敗時に0を返す
-int allocateAndStartCommandBuffer(VulkanAppCore core, VkCommandBuffer *cmdBuffer);
+/// @returns 失敗時にNULLを返す。
+VkCommandBuffer allocateAndStartCommandBuffer(VulkanAppCore core);
 
 /// @brief コマンドバッファの記録を終了しキューに提出する関数
 ///
@@ -76,7 +74,7 @@ int allocateAndStartCommandBuffer(VulkanAppCore core, VkCommandBuffer *cmdBuffer
 /// @param waitDstStageMasks waitForImageEnabledSemaphoresのそれぞれのセマフォがどのパイプラインステージを待機するかの配列
 /// @param signalSemaphoresCount waitForRenderingSemaphoresの要素数
 /// @param signalSemaphores 描画終了を待機するセマフォの配列
-/// @return 
+/// @returns 失敗時に0を返す。
 int endAndSubmitCommandBuffer(
     VulkanAppCore core,
     VkCommandBuffer cmdBuffer,

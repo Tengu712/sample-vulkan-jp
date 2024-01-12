@@ -1,6 +1,5 @@
 /// @file presentation.h
 /// @brief Vulkanアプリケーションのプレゼンテーションオブジェクトに関するモジュール
-/// @warning Vulkanアプリケーション内部向けのヘッダーファイルであるため、外部からはincludeすべきではない。
 
 #pragma once
 
@@ -21,7 +20,12 @@ typedef struct VulkanAppPresentation_t {
     VkSemaphore waitForRenderingSemaphore;
 } *VulkanAppPresentation;
 
-/// @brief Vulkanアプリケーションのプレゼンテーションオブジェクトを作成する関数
+/// @brief VulkanAppPresentationを破棄する関数
+/// @param core 主要オブジェクトハンドル
+/// @param presenter プレゼンテーションオブジェクトハンドル
+void deleteVulkanAppPresentation(const VulkanAppCore core, VulkanAppPresentation presenter);
+
+/// @brief VulkanAppPresentationを作成する関数
 ///
 /// 与えられたサーフェスに関連したスワップチェーンを作成し、スワップチェーンの持つ描画先イメージのイメージビューを作成する。
 /// これ単体では描画能力は持っていないが、レンダリングオブジェクトによってサーフェスへ描画することができるようになる。
@@ -32,11 +36,6 @@ typedef struct VulkanAppPresentation_t {
 /// @param surface サーフェス
 /// @returns 失敗時にNULLを返す。
 VulkanAppPresentation createVulkanAppPresentation(const VulkanAppCore core, const VkSurfaceKHR surface);
-
-/// @brief Vulkanアプリケーションのプレゼンテーションオブジェクトを破棄する関数
-/// @param core 主要オブジェクトハンドル
-/// @param presenter プレゼンテーションオブジェクトハンドル
-void deleteVulkanAppPresentation(const VulkanAppCore core, VulkanAppPresentation presenter);
 
 /// @brief 次のフレームバッファのインデックスを取得する関数
 /// @param core 主要オブジェクトハンドル

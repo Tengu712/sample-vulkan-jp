@@ -1,10 +1,12 @@
 /// @file rendering.h
 /// @brief Vulkanアプリケーションのレンダリングオブジェクトに関するモジュール
-/// @warning Vulkanアプリケーション内部向けのヘッダーファイルであるため、外部からはincludeすべきではない。
 
 #pragma once
 
 #include "core.h"
+#include "pipelines/ui.h"
+#include "util/memory/buffer.h"
+#include "util/model.h"
 
 #include <stdint.h>
 #include <vulkan/vulkan.h>
@@ -14,7 +16,17 @@ typedef struct VulkanAppRendering_t {
     VkRenderPass renderPass;
     VkFramebuffer *framebuffers;
     uint32_t framebuffersCount;
+    VkDescriptorPool descPool;
+    PipelineForUI uiPipeline;
+    VkDescriptorSet descSetForUI;
+    Buffer uniBufferForUI;
+    Model square;
 } *VulkanAppRendering;
+
+/// @brief Vulkanアプリケーションのレンダリングオブジェクトを破棄する関数
+/// @param core 主要オブジェクトハンドル
+/// @param renderer レンダリングオブジェクトハンドル
+void deleteVulkanAppRendering(const VulkanAppCore core, VulkanAppRendering renderer);
 
 /// @brief Vulkanアプリケーションのレンダリングオブジェクトを作成する関数
 ///
@@ -33,11 +45,6 @@ VulkanAppRendering createVulkanAppRendering(
     uint32_t height,
     VkImageLayout imageLayout
 );
-
-/// @brief Vulkanアプリケーションのレンダリングオブジェクトを破棄する関数
-/// @param core 主要オブジェクトハンドル
-/// @param renderer レンダリングオブジェクトハンドル
-void deleteVulkanAppRendering(const VulkanAppCore core, VulkanAppRendering renderer);
 
 /// @brief 描画関数
 /// @param core 主要オブジェクトハンドル
